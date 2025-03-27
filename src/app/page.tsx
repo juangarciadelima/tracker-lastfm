@@ -1,101 +1,267 @@
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SpotifyLogo, LastfmLogo } from "@phosphor-icons/react/dist/ssr";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+
 import Image from "next/image";
+import { use } from "react";
+import querystring from "querystring";
+
+interface Albums {
+  url: string;
+  playcount: string;
+  name: string;
+  mbid: string;
+  "@attr": string;
+  artist: {
+    "#text": string;
+    mbid: string;
+  };
+}
+
+interface WeeklyChart {
+  weeklyalbumchart: {
+    album: Albums[];
+  };
+}
+
+const {
+  SPOTIFY_CLIENT_ID: client_id,
+  SPOTIFY_CLIENT_SECRET: client_secret,
+  SPOTIFY_REFRESH_TOKEN: refresh_token,
+} = process.env;
+
+const weeklyChartPromise = async () => {
+  const data = await fetch(
+    "https://ws.audioscrobbler.com/2.0/?method=user.getweeklyalbumchart&user=kirinzito&api_key=d1d0e0ae8b386c15aee8df74c008fa43&format=json"
+  );
+  const weeklyChart: WeeklyChart = await data.json();
+
+  return weeklyChart;
+};
+
+const getUserInfoPromise = async () => {
+  const userInfo = await fetch(
+    "https://ws.audioscrobbler.com/2.0/?method=user.getinfo&user=kirinzito&api_key=d1d0e0ae8b386c15aee8df74c008fa43&format=json"
+  );
+
+  const userInfoData = await userInfo.json();
+
+  return userInfoData;
+};
+
+const basic = Buffer.from(`${client_id}:${client_secret}`).toString("base64");
+const NOW_PLAYING_ENDPOINT = `https://api.spotify.com/v1/me/player/currently-playing`;
+const TOKEN_ENDPOINT = `https://accounts.spotify.com/api/token`;
+
+const getAccessToken = async () => {
+  const response = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: querystring.stringify({
+      grant_type: "refresh_token",
+      refresh_token,
+    }),
+  });
+
+  return response.json();
+};
+
+const getNowPlaying = async () => {
+  const { access_token } = await getAccessToken();
+
+  return fetch(NOW_PLAYING_ENDPOINT, {
+    headers: {
+      Authorization: `Bearer ${access_token}`,
+    },
+  });
+};
+
+const getCurrentPlaying = async () => {
+  const response = await getNowPlaying();
+
+  const data = response.body !== null ? await response.json() : null;
+
+  const currentPlayingData = {
+    isPlaying: data?.is_playing,
+    title: data?.item?.name,
+    album: data?.item?.album?.name,
+    artist: data?.item?.album?.artists
+      .map((artist: { name: string }) => artist.name)
+      .join(", "),
+    albumImageUrl: data?.item?.album?.images[0].url,
+    songUrl: data?.item?.external_urls?.spotify,
+  };
+
+  return currentPlayingData;
+};
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const weeklyChart: WeeklyChart = use(weeklyChartPromise());
+  const userInfo = use(getUserInfoPromise());
+  const currentPlaying = use(getCurrentPlaying());
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const userInfoImage = userInfo?.user?.image?.find(
+    (image: { size: string; "#text": string }) => image.size === "extralarge"
+  );
+
+  const getPhotoAlbum = async (album: Albums) => {
+    console.log(album);
+    const photo = await fetch(
+      `https://ws.audioscrobbler.com/2.0/?method=album.getinfo&api_key=d1d0e0ae8b386c15aee8df74c008fa43&artist=${album.artist["#text"]}&album=${album.name}&format=json`
+    );
+
+    const photoData = await photo.json();
+
+    return photoData?.album?.image?.find(
+      (image: { size: string; "#text": string }) => image.size === "mega"
+    );
+  };
+
+  const extractFirstTwoLetters = (name: string) => {
+    return name
+      .split(" ")
+      .map((word) => word[0])
+      .join("");
+  };
+
+  return (
+    <>
+      <div className="bg-bg h-screen flex items-start justify-center p-14 w-screen">
+        <div className="flex flex-col w-full gap-6">
+          <div className="flex justify-between items-center">
+            <h1 className=" pixelized-font text-3xl">
+              See what i&apos;ve been hearing in the last week
+            </h1>
+            {currentPlaying?.isPlaying ? (
+              <div className="pixelized-font flex flex-col">
+                <span>Current playing:</span>
+                <div className="flex items-center gap-2 group relative">
+                  <Image
+                    src={currentPlaying?.albumImageUrl}
+                    alt={`Foto do álbum ${currentPlaying?.title}`}
+                    width={400}
+                    height={400}
+                    className="absolute bottom-0 right-0 w-full h-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                  />
+                  <span className="text-red-600 text-3xl">
+                    {currentPlaying?.title}
+                  </span>{" "}
+                  - {currentPlaying?.artist}
+                </div>
+              </div>
+            ) : (
+              <div className="pixelized-font text-xl">
+                Not playing anything right now {":("}
+              </div>
+            )}
+
+            <div className="flex items-center gap-4">
+              <h2 className="pixelized-font text-xl">{userInfo?.user?.name}</h2>
+              <ContextMenu>
+                <ContextMenuTrigger>
+                  <Avatar>
+                    <AvatarImage src={userInfoImage["#text"]} />
+                    <AvatarFallback>
+                      {extractFirstTwoLetters(userInfo?.user?.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem inset>
+                    <a
+                      href={userInfo?.user?.url}
+                      target="_blank"
+                      className="flex items-center gap-2 pixelized-font"
+                    >
+                      Follow me on LastFM
+                      <LastfmLogo size={32} color="#ffffff" />
+                    </a>
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem inset>
+                    <a
+                      href="https://open.spotify.com/user/1tic8sv4o1lnljhs7dl9xvofm?si=f9ac12fd7df34cf5"
+                      target="_blank"
+                      className="flex items-center gap-2 pixelized-font"
+                    >
+                      Follow me on Spotify
+                      <SpotifyLogo size={32} color="#ffffff" />
+                    </a>
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 grid-rows-2 gap-6 w-full">
+            {weeklyChart.weeklyalbumchart.album.map(async (album: Albums) => {
+              const photo = await getPhotoAlbum(album);
+
+              return (
+                <>
+                  <Card
+                    key={album.name}
+                    className="mt-4 w-[450px] h-[450px] group flex items-center justify-center"
+                  >
+                    <CardHeader className="flex items-center justify-center p-0 rounded-base relative w-full">
+                      {photo && (
+                        <Image
+                          src={photo["#text"]}
+                          alt={`Foto do álbum ${album.name}`}
+                          width={450}
+                          height={450}
+                          className="w-full h-full filter  group-hover:brightness-50 group-hover:blur-sm transition-all duration-300"
+                        />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <CardContent className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 w-full h-full flex flex-col items-center justify-center gap-4">
+                          <div className="flex flex-col items-center justify-center gap-2 text-center">
+                            <h2 className="pixelized-font text-4xl text-red-300">
+                              {album.name}
+                            </h2>
+                            <p className="pixelized-font">
+                              <span className="text-red-300">
+                                {album.artist["#text"]}
+                              </span>{" "}
+                              - {album.playcount} plays
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              asChild
+                              variant="reverse"
+                              size="default"
+                              className="pixelized-font"
+                            >
+                              <a
+                                href={album.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                See on Last.fm
+                              </a>
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </div>
+                    </CardHeader>
+                  </Card>
+                </>
+              );
+            })}
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      </div>
+    </>
   );
 }
